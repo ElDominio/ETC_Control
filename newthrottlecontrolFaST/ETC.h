@@ -58,7 +58,7 @@ unsigned int FindMinAPP(int POT_PEDAL){
   return MinAPP;
 }
 
-bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int restTPS){
+bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2, int maxTPS2, int minAPP2, int maxAPP2, int restTPS){
   Serial.print("MaxTPS = "); Serial.println(maxTPS);
   Serial.print("MinTPS = "); Serial.println(minTPS);
   Serial.print("MaxAPP = "); Serial.println(maxAPP);
@@ -74,6 +74,14 @@ bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int restTPS
   EEPROM.update(8,true);// address 8 saved calibration status
   EEPROM.update(9,highByte(restTPS));
   EEPROM.update(10,lowByte(restTPS));
+  EEPROM.update(11,highByte(minTPS2));
+  EEPROM.update(12,lowByte(minTPS2));
+  EEPROM.update(13,highByte(maxTPS2));
+  EEPROM.update(14,lowByte(maxTPS2));
+  EEPROM.update(15,highByte(minAPP2));
+  EEPROM.update(16,lowByte(minAPP2));
+  EEPROM.update(17,highByte(maxAPP2));
+  EEPROM.update(18,lowByte(maxAPP2));
   Serial.println("All calibration values are saved");
   return true; //to be used to set calibration flag
 }
@@ -90,7 +98,16 @@ bool clearCalibration(){
   
     EEPROM.update(8,false);// address 8 saved calibration status
     EEPROM.update(9,highByte(0));
-  EEPROM.update(10,lowByte(0));
+  EEPROM.update(10,0);
+  
+  EEPROM.update(11, 0);
+  EEPROM.update(12,0);
+  EEPROM.update(13,0);
+  EEPROM.update(14,0);
+  EEPROM.update(15,0);
+  EEPROM.update(16,0);
+  EEPROM.update(17,0);
+  EEPROM.update(18,0);
   Serial.println("Calibration Cleared");
   return false;
 }

@@ -69,6 +69,9 @@ unsigned long idlePWMtime = 0;
 bool idleCount = true;
 byte dutyCyclein = 0;
 byte throttleMode = 0;
+bool safetyCheck = true;
+byte safetyCount = 0;
+byte safetyMode = 0;
 
 //Define the PID controller
 double Input, Output, SetPoint;
@@ -108,40 +111,94 @@ void loop() {
     int inTPS = analogRead(POT_THROTTLE); //read for example 48, meaning throttle at rest, max is 758
     int rawAPP = analogRead(POT_PEDAL); //read for example 70, app is 0 (no demand), max is 940
     int inAPP = map(rawAPP,MinAPP, MaxAPP, MinTPS, MaxTPS);
+    idleSetPoint = 100 + dutyCyclein; //analogRead(POT_IDLE);
+
+    
     
     switch(throttleMode){
       case 0:
        break;
       case 1:
        if (inAPP < 300){
-        map(inAPP, MinAPP, 300, MinAPP, 250);
+        inAPP = map(inAPP, MinAPP, 300, MinAPP, 250);
        }
        else if( (inAPP > 300) && (inAPP < 600)){
-        map(inAPP, 300, 600, 250, 700);
+        inAPP = map(inAPP, 300, 600, 250, 700);
        }
        else{
-        map(inAPP, 600, MaxAPP, 700, MaxAPP);
+        inAPP = map(inAPP, 600, MaxAPP, 700, MaxAPP);
        }
        break;
     }
 
-    if (abs(inTPS - inAPP) < 70){
+   /* if (abs(inTPS - inAPP) < 70){
       state = 'c'; //Sets to steady state
     }
     else if (abs(inTPS - inAPP) >= 70){
       //Serial.println(inTPS -inAPP);
       state = 't';  //sets to transient mode
     }
-    if ((rawAPP <= MinAPP + 3)/* && (inTPS < MinTPS + 60 )*/){
+    if ((rawAPP <= MinAPP + 3)){
       state = 'i';  //sets idle mode
       idleSetPoint = 100 + dutyCyclein; //analogRead(POT_IDLE);
+    }*/
+
+    if (inAPP <= idleSetPoint){
+      state = 'i';  //sets idle mode
+    }
+     else if (inAPP > idleSetPoint){
+      state = 'c'; //Sets to steady state
+    }
+    if (abs(inTPS - inAPP) >= 60){
+      //Serial.println(inTPS -inAPP);
+      state = 't';  //sets to transient mode
+    }
+    if (safetyMode > 0){
+      state = 's';
     }
 
+    if (((millis() % 200) == 0) && (safetyCheck == true)){
+        int inTPS2 = analogRead(POT_THROTTLE2);
+        int rawAPP2 = analogRead(POT_PEDAL2);
+        inTPS2 = map(inTPS2, MinTPS2+15, MaxTPS2, MinTPS, MaxTPS);
+        rawAPP2 = map(rawAPP2, MinAPP2, MaxAPP2, MinAPP, MaxAPP);
+        int TPSerror = abs(inTPS-inTPS2);
+        int APPerror = abs(rawAPP-rawAPP2);
+        int correlationError;
+        if (state == 'i'){
+           correlationError = abs(inTPS - idleSetPoint);
+        }
+        else{ correlationError = abs(inTPS - inAPP);}
+        
+        if ((TPSerror > 10) || (APPerror > 10) || (correlationError > 15)){
+          safetyCount++;
+        }
+        else{
+          safetyCount = 0;
+        }
 
+        if (safetyCount > 10){
+          //Serial.println("ETC SYSTEM ERROR!");
+          safetyMode = 1;
+        }
+        else if (safetyCount > 20){
+          safetyMode = 2;
+        }
+        else if (safetyCount > 30){
+          safetyMode = 3;
+        }
+        safetyCheck = false;
+        /*if (diagEnabled){
+          Serial.print("TPS Error = ");Serial.println(TPSerror);
+          Serial.print("APP Error = ");Serial.println(APPerror);
+          Serial.print("Correlation Error = ");Serial.println(correlationError);
+        }*/
+    }
+    else if((millis() % 200) != 0) { safetyCheck = true;}
     
-     if ((millis() - timeDiag) > 500){
-      int inTPS2 = analogRead(POT_THROTTLE2);
-      int rawAPP2 = analogRead(POT_PEDAL2);
+     if ((millis() - timeDiag) > 600){
+     
+      
       if (diagEnabled){
         /*Serial.print("TPS2 % = "); Serial.println(inTPS2);
         Serial.print("APP % = "); Serial.println(rawAPP);
@@ -151,7 +208,11 @@ void loop() {
         Serial.print("MaxTPS % = "); Serial.println(MaxTPS);
         Serial.print("MinTPS % = "); Serial.println(MinTPS);
         Serial.print("MaxAPP % = "); Serial.println(MaxAPP);
-        Serial.print("MinAPP % = "); Serial.println(MinAPP);*/
+        Serial.print("MinAPP % = "); Serial.println(MinAPP);        
+        Serial.print("TPS % = "); Serial.println(inTPS);Serial.print("TPS2 % = "); Serial.println(inTPS2);
+        //Serial.print("SafetyCount = ");Serial.println(safetyCount);
+        Serial.print("Safetymode = ");Serial.println(safetyMode);
+        */
 
         Serial.print("TPS % = "); Serial.println(inTPS);
         Serial.print("Calibrated APP% = "); Serial.println(inAPP);
@@ -254,6 +315,47 @@ void loop() {
           }
         //Serial.println("Idle control");
         break;
+        case 's': // safetymodes
+          if (safetyMode == 1){ 
+            throttlePID.SetTunings(1.9, .07, 0.03);
+            SetPoint = constrain(SetPoint, 140, 155);
+            //  throttlePID.SetSampleTime(2);
+            if (inTPS < inAPP){
+                digitalWrite(HB_DIRECTION, 0);            //sets ETC Direction to forward
+                throttlePID.SetControllerDirection(DIRECT);
+                throttlePID.SetOutputLimits(20,180);
+                //Serial.print("PID Output = "); Serial.println(Output);
+                throttlePID.Compute();                    //compute PID based correction
+                analogWrite(HB_PWM,(Output));  //uses the base duty and adds a correction factor with PID
+                //Serial.println("Steady State Forward");
+              }
+            else {
+                 digitalWrite(HB_DIRECTION, 1);                       //set ETC Direction Backward
+                 /*throttlePID.SetTunings(1.4, 1, 0.7);
+                 throttlePID.SetControllerDirection(REVERSE);
+                 throttlePID.SetOutputLimits(20,120);
+                 throttlePID.Compute();   */
+                 if (abs(inTPS - inAPP) < 5){
+                  analogWrite(HB_PWM,20);  //makes throttle go backward with open loop values
+                  //Serial.println("Idle backslow");
+                 }
+                 else{
+                  analogWrite(HB_PWM,80);  //makes throttle go backward with open loop values
+                  //Serial.println("Idle back");
+                 }
+                 throttlePID.Compute();                    //compute PID based correction
+      
+                }
+          }
+          else if (safetyMode == 2){
+            digitalWrite(HB_DIRECTION, 1);
+            analogWrite(HB_PWM,60);
+          }
+          else {
+            digitalWrite(HB_DIRECTION, 1);
+            analogWrite(HB_PWM,0);
+          }
+         break;
         default: //Assumes an error in the char assignation and closes the throttle
           digitalWrite(HB_DIRECTION, 1);
           analogWrite(HB_PWM,0);
@@ -282,7 +384,7 @@ void serialCommands(byte serialRead){
         diagEnabled = !diagEnabled;
         break;
        case 4:
-        calFlag = burnCalibration(MinTPS, MaxTPS, MinAPP, MaxAPP, MinTPS2, MaxTPS2, MinAPP2, MaxAPP2,throttleRest);
+        calFlag = burnCalibration(MinTPS, MaxTPS, MinAPP, MaxAPP, MinTPS2, MaxTPS2, MinAPP2, MaxAPP2,throttleRest,throttleMode);
         break;
        case 5:
         calFlag = clearCalibration();
@@ -291,6 +393,9 @@ void serialCommands(byte serialRead){
         throttleMode++;
         if (throttleMode > 1){ throttleMode = 0;}
         Serial.print("Throttlemode changed to = ");Serial.println(throttleMode);
+        break;
+       case 7:
+        safetyMode = 0;
         break;
       default:
         break;
@@ -327,6 +432,7 @@ void loadCalibration(){
   high = EEPROM.read(17);
   low = EEPROM.read(18);
   MaxAPP2 = word(high,low);
+  throttleMode = EEPROM.read(19);
 }
 
 void idleRequestPWM(){

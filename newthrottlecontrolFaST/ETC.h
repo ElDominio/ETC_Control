@@ -58,7 +58,7 @@ unsigned int FindMinAPP(int POT_PEDAL){
   return MinAPP;
 }
 
-bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2, int maxTPS2, int minAPP2, int maxAPP2, int restTPS){
+bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2, int maxTPS2, int minAPP2, int maxAPP2, int restTPS, int throttleMode){
   Serial.print("MaxTPS = "); Serial.println(maxTPS);
   Serial.print("MinTPS = "); Serial.println(minTPS);
   Serial.print("MaxAPP = "); Serial.println(maxAPP);
@@ -82,6 +82,7 @@ bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2
   EEPROM.update(16,lowByte(minAPP2));
   EEPROM.update(17,highByte(maxAPP2));
   EEPROM.update(18,lowByte(maxAPP2));
+  EEPROM.update(19,throttleMode);
   Serial.println("All calibration values are saved");
   return true; //to be used to set calibration flag
 }
@@ -108,6 +109,7 @@ bool clearCalibration(){
   EEPROM.update(16,0);
   EEPROM.update(17,0);
   EEPROM.update(18,0);
+  EEPROM.update(19,0);
   Serial.println("Calibration Cleared");
   return false;
 }

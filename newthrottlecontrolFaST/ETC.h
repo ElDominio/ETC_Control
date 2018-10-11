@@ -1,4 +1,6 @@
 #include <EEPROM.h>
+
+
 int FindMinTPS(int, int, int);
 int FindMaxTPS(int, int, int);
 unsigned int FindMinAPP(int);
@@ -59,6 +61,8 @@ unsigned int FindMinAPP(int POT_PEDAL){
 }
 
 bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2, int maxTPS2, int minAPP2, int maxAPP2, int restTPS, int throttleMode){
+  FastCRC8 CRC8;
+  
   Serial.print("MaxTPS = "); Serial.println(maxTPS);
   Serial.print("MinTPS = "); Serial.println(minTPS);
   Serial.print("MaxAPP = "); Serial.println(maxAPP);
@@ -84,6 +88,15 @@ bool burnCalibration(int minTPS, int maxTPS, int minAPP, int maxAPP, int minTPS2
   EEPROM.update(18,lowByte(maxAPP2));
   EEPROM.update(19,throttleMode);
   Serial.println("All calibration values are saved");
+
+  uint8_t CRCbuf[19];
+  for (int i = 0; i < 20; i++){
+    CRCbuf[i] = EEPROM.read(i);
+    Serial.print("CRC buffer[");Serial.print(i);Serial.print("] = ");Serial.println(CRCbuf[i]);
+    Serial.print("EEPROM[");Serial.print(i);Serial.print("] = ");Serial.println(EEPROM.read(i));
+  }
+  EEPROM.update(20, CRC8.smbus(CRCbuf, sizeof(CRCbuf)));
+  Serial.print("CRC value = "); Serial.println(CRC8.smbus(CRCbuf, sizeof(CRCbuf)));
   return true; //to be used to set calibration flag
 }
 

@@ -1,7 +1,12 @@
+#include <FastCRC.h>
+#include <FastCRC_tables.h>
+#include <FastCRC_cpu.h>
+
 #include <EnableInterrupt.h>
 
 #include <PID_v1.h>
 #include "ETC.h"
+
 
 //AlphaX Throttle Control
 //Licensed under the GPL v3
@@ -73,6 +78,8 @@ bool safetyCheck = true;
 byte safetyCount = 0;
 byte safetyMode = 0;
 
+FastCRC8 CRC8;
+
 //Define the PID controller
 double Input, Output, SetPoint;
 PID throttlePID(&Input, &Output, &SetPoint, kP, kI, kD, DIRECT);
@@ -80,7 +87,7 @@ PID throttlePID(&Input, &Output, &SetPoint, kP, kI, kD, DIRECT);
 //PID idlePID(&Input, &idleOutput,  = true&idleSetPoint, idlekP, idlekI, idlekD, DIRECT);
 
 //Operating States flag 
-char state = 's'; //s = start, t = transient, i = idle, c = constant (steady state)
+char state = 's'; //s = safety, t = transient, i = idle, c = constant (steady state)
 
 void setup() {
   // put your setup code here, to run once:
@@ -92,8 +99,22 @@ void setup() {
   //idlePID.SetMode(AUTOMATIC);
   calFlag = EEPROM.read(8);
   if (calFlag){
-    loadCalibration();
-    Serial.println("Calibration Loaded");
+    uint8_t CRCbuf[19];
+    for (int i = 0; i < 20; i++){
+      CRCbuf[i] = EEPROM.read(i);
+    }
+    uint8_t CRCvalue = EEPROM.read(20);
+    Serial.print("CRC buffer value = "); Serial.println(CRC8.smbus(CRCbuf, sizeof(CRCbuf)));
+    Serial.print("CRC value = "); Serial.println(EEPROM.read(20));
+    if (CRCvalue == CRC8.smbus(CRCbuf, sizeof(CRCbuf))){
+      loadCalibration();
+      Serial.println("Calibration Loaded");
+    }
+    else{ 
+      safetyMode = 3;
+      Serial.println("Calibration Corrupted! No loading was done!");
+    }
+    
   }
   pinMode(HB_DIRECTION, OUTPUT);
   enableInterrupt(idlePWMPin, idleRequestPWM, CHANGE);
@@ -160,60 +181,63 @@ void loop() {
     if (((millis() % 200) == 0) && (safetyCheck == true)){
         int inTPS2 = analogRead(POT_THROTTLE2);
         int rawAPP2 = analogRead(POT_PEDAL2);
-        inTPS2 = map(inTPS2, MinTPS2+15, MaxTPS2, MinTPS, MaxTPS);
+        inTPS2 = map(inTPS2, MinTPS2+18, MaxTPS2, MinTPS, MaxTPS);
         rawAPP2 = map(rawAPP2, MinAPP2, MaxAPP2, MinAPP, MaxAPP);
         int TPSerror = abs(inTPS-inTPS2);
         int APPerror = abs(rawAPP-rawAPP2);
-        int correlationError;
+        int correlationError = 0;
         if (state == 'i'){
-           correlationError = abs(inTPS - idleSetPoint);
+           //correlationError = abs(inTPS - idleSetPoint);
+           TPSerror = 0;
         }
         else{ correlationError = abs(inTPS - inAPP);}
-        
-        if ((TPSerror > 10) || (APPerror > 10) || (correlationError > 15)){
+
+        if ((TPSerror > 10) || (APPerror > 10) || (correlationError > 35)){
           safetyCount++;
         }
-        else{
-          safetyCount = 0;
+        else if (safetyCount != 0){
+          safetyCount--;
         }
-
-        if (safetyCount > 10){
+        if (safetyCount == 0){
+          state = 'i';
+          safetyCheck = true;
+          safetyMode = 0;
+        }
+        //if(safetyCount > 10){
+        if ((safetyCount > 10) && (safetyCount <= 20)){
           //Serial.println("ETC SYSTEM ERROR!");
           safetyMode = 1;
         }
-        else if (safetyCount > 20){
-          safetyMode = 2;
+        /*else if ((safetyCount > 20) && (safetyCount <= 30)){
+         safetyMode = 2;
+          Serial.println("ETC SYSTEM ERROR HIGH!");
         }
         else if (safetyCount > 30){
           safetyMode = 3;
-        }
-        safetyCheck = false;
-        /*if (diagEnabled){
-          Serial.print("TPS Error = ");Serial.println(TPSerror);
-          Serial.print("APP Error = ");Serial.println(APPerror);
-          Serial.print("Correlation Error = ");Serial.println(correlationError);
+          Serial.println("ETC SYSTEM ERROR CRITICAL!");
         }*/
+        safetyCheck = false;
+        if ((diagEnabled) && safetyMode > 0){
+          Serial.print("TPS Error = "); Serial.println(TPSerror);
+          Serial.print("TPS % = "); Serial.println(inTPS);
+          Serial.print("TPS2 % = "); Serial.println(inTPS2);
+          Serial.print("correlationError% = "); Serial.println(correlationError);
+          Serial.print("safetyCount = "); Serial.println(safetyCount);
+          Serial.print("safetyMode = "); Serial.println(safetyMode);
+         /* Serial.print("MaxTPS % = "); Serial.println(MaxTPS);
+          Serial.print("MinTPS % = "); Serial.println(MinTPS);
+          Serial.print("MaxTPS2 % = "); Serial.println(MaxTPS2);
+          Serial.print("MinTPS2 % = "); Serial.println(MinTPS2);*/
+         // Serial.print("APPerror = "); Serial.println(APPerror);
+          
+        }
     }
     else if((millis() % 200) != 0) { safetyCheck = true;}
     
      if ((millis() - timeDiag) > 600){
      
       
-      if (diagEnabled){
-        /*Serial.print("TPS2 % = "); Serial.println(inTPS2);
-        Serial.print("APP % = "); Serial.println(rawAPP);
-        Serial.print("APP2% = "); Serial.println(rawAPP2);
-        Serial.print("MaxAPP % = "); Serial.println(MaxAPP);
-        Serial.print("MinAPP % = "); Serial.println(MinAPP);
-        Serial.print("MaxTPS % = "); Serial.println(MaxTPS);
-        Serial.print("MinTPS % = "); Serial.println(MinTPS);
-        Serial.print("MaxAPP % = "); Serial.println(MaxAPP);
-        Serial.print("MinAPP % = "); Serial.println(MinAPP);        
-        Serial.print("TPS % = "); Serial.println(inTPS);Serial.print("TPS2 % = "); Serial.println(inTPS2);
-        //Serial.print("SafetyCount = ");Serial.println(safetyCount);
-        Serial.print("Safetymode = ");Serial.println(safetyMode);
-        */
-
+      if ((diagEnabled) && safetyMode == 0){
         Serial.print("TPS % = "); Serial.println(inTPS);
         Serial.print("Calibrated APP% = "); Serial.println(inAPP);
         Serial.print("State: "); Serial.println(state);
@@ -238,7 +262,7 @@ void loop() {
       if (inTPS < inAPP){
           digitalWrite(HB_DIRECTION, 0);            //sets ETC Direction to forward
           throttlePID.SetControllerDirection(DIRECT);
-          throttlePID.SetOutputLimits(30,200);
+          throttlePID.SetOutputLimits(50,200);
           //Serial.print("PID Output = "); Serial.println(Output);
           throttlePID.Compute();                    //compute PID based correction
           analogWrite(HB_PWM,(Output));  //uses the base duty and adds a correction factor with PID
@@ -302,7 +326,7 @@ void loop() {
            throttlePID.SetOutputLimits(20,120);
            throttlePID.Compute();   */
            if (abs(inTPS - idleSetPoint) < 5){
-            analogWrite(HB_PWM,60);  //makes throttle go backward with open loop values
+            analogWrite(HB_PWM,20);  //makes throttle go backward with open loop values
             //Serial.println("Idle backslow");
            }
            else{
@@ -318,34 +342,34 @@ void loop() {
         case 's': // safetymodes
           if (safetyMode == 1){ 
             throttlePID.SetTunings(1.9, .07, 0.03);
-            SetPoint = constrain(SetPoint, 140, 155);
+            SetPoint = constrain(SetPoint, 160, 980);
             //  throttlePID.SetSampleTime(2);
             if (inTPS < inAPP){
-                digitalWrite(HB_DIRECTION, 0);            //sets ETC Direction to forward
-                throttlePID.SetControllerDirection(DIRECT);
-                throttlePID.SetOutputLimits(20,180);
-                //Serial.print("PID Output = "); Serial.println(Output);
-                throttlePID.Compute();                    //compute PID based correction
-                analogWrite(HB_PWM,(Output));  //uses the base duty and adds a correction factor with PID
-                //Serial.println("Steady State Forward");
-              }
+              digitalWrite(HB_DIRECTION, 0);            //sets ETC Direction to forward
+              throttlePID.SetControllerDirection(DIRECT);
+              throttlePID.SetOutputLimits(20,180);
+              //Serial.print("PID Output = "); Serial.println(Output);
+              throttlePID.Compute();                    //compute PID based correction
+              analogWrite(HB_PWM,(Output));  //uses the base duty and adds a correction factor with PID
+              //Serial.println("Steady State Forward");
+            }
             else {
-                 digitalWrite(HB_DIRECTION, 1);                       //set ETC Direction Backward
-                 /*throttlePID.SetTunings(1.4, 1, 0.7);
-                 throttlePID.SetControllerDirection(REVERSE);
-                 throttlePID.SetOutputLimits(20,120);
-                 throttlePID.Compute();   */
-                 if (abs(inTPS - inAPP) < 5){
-                  analogWrite(HB_PWM,20);  //makes throttle go backward with open loop values
-                  //Serial.println("Idle backslow");
-                 }
-                 else{
-                  analogWrite(HB_PWM,80);  //makes throttle go backward with open loop values
-                  //Serial.println("Idle back");
-                 }
-                 throttlePID.Compute();                    //compute PID based correction
-      
-                }
+             digitalWrite(HB_DIRECTION, 1);                       //set ETC Direction Backward
+             /*throttlePID.SetTunings(1.4, 1, 0.7);
+             throttlePID.SetControllerDirection(REVERSE);
+             throttlePID.SetOutputLimits(20,120);
+             throttlePID.Compute();   */
+             if (abs(inTPS - inAPP) < 5){
+              analogWrite(HB_PWM,20);  //makes throttle go backward with open loop values
+              //Serial.println("Idle backslow");
+             }
+             else{
+              analogWrite(HB_PWM,80);  //makes throttle go backward with open loop values
+              //Serial.println("Idle back");
+             }
+             throttlePID.Compute();                    //compute PID based correction
+  
+            }
           }
           else if (safetyMode == 2){
             digitalWrite(HB_DIRECTION, 1);
@@ -354,6 +378,7 @@ void loop() {
           else {
             digitalWrite(HB_DIRECTION, 1);
             analogWrite(HB_PWM,0);
+            safetyCheck = false;
           }
          break;
         default: //Assumes an error in the char assignation and closes the throttle
@@ -373,6 +398,7 @@ void serialCommands(byte serialRead){
         MinTPS2 = FindMinTPS(HB_PWM, HB_DIRECTION, POT_THROTTLE2);
         throttleRest = FindRestingTPS(HB_PWM, HB_DIRECTION, POT_THROTTLE);
         break;
+        
       case 2:
       //CalibrateAPP
         MaxAPP = FindMaxAPP(POT_PEDAL);
@@ -396,6 +422,15 @@ void serialCommands(byte serialRead){
         break;
        case 7:
         safetyMode = 0;
+        break;
+       case 8:
+        uint8_t CRCbuf[19];
+        for (int i = 0; i < 20; i++){
+          CRCbuf[i] = EEPROM.read(i);
+        }
+        //uint8_t CRCvalue2 = EEPROM.read(20);
+        Serial.print("CRC buffer value = "); Serial.println(CRC8.smbus(CRCbuf, sizeof(CRCbuf)));
+        Serial.print("CRC value = "); Serial.println(EEPROM.read(20));
         break;
       default:
         break;
